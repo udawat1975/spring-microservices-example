@@ -3,15 +3,16 @@ pipeline {
     stages {
         stage('Build Application') {
             steps {
-                // Change into the product-service directory first
                 dir('product-service') {
+                    // Add this line to make the script executable
+                    sh 'chmod +x mvnw'
+                    // Now run the build
                     sh './mvnw clean package'
                 }
             }
         }
         stage('Build Docker Image') {
             steps {
-                // Change directory here as well
                 dir('product-service') {
                     sh 'docker build -t product-service:latest .'
                 }
@@ -19,7 +20,6 @@ pipeline {
         }
         stage('Deploy to Kubernetes') {
             steps {
-                // And here, to find the .yaml file
                 dir('product-service') {
                     sh 'kubectl apply -f product-service-deployment.yaml'
                 }
