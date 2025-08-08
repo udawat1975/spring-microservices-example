@@ -1,42 +1,72 @@
 pipeline {
-    agent any
-    stages {
-        stage('Build Application') {
-            steps {
-                dir('product-service') {
-                    sh 'chmod +x mvnw'
-                    sh './mvnw clean package'
-                }
-            }
+  agent any
+
+  environment {
+    APP         = 'product-service'
+    REGISTRY    = 'docker.io/udawat'
+    IMAGE_REPO  = "${REGISTRY}/${APP}"
+  }
+
+  stages {
+    stage('Build Application') {
+      steps {
+        dir('product-service') {
+          sh 'chmod +x mvnw'
+          sh './mvnw -q clean package -DskipTests'
         }
-        stage('Build Docker Image') {
-            steps {
-                dir('product-service') {
-                    sh 'docker build -t product-service:latest .'
-                }
-            }
-        }
-        stage('Load Image into Minikube') {
-            steps {
-                sh 'minikube image load product-service:latest'
-            }
-        }
-        stage('Deploy to Kubernetes') {
-            steps {
-                // Load the 'kubeconfig-secret-text' credential into a variable
-                withCredentials([string(credentialsId: 'kubeconfig-secret-text', variable: 'KUBECONFIG_CONTENT')]) {
-                    
-                    // Write the content of that variable to a temporary file in the workspace
-                    writeFile file: 'kubeconfig.tmp', text: KUBECONFIG_CONTENT
-                    
-                    // Use that temporary file as the config for all commands inside this block
-                    withEnv(["KUBECONFIG=${env.WORKSPACE}/kubeconfig.tmp"]) {
-                        dir('product-service') {
-                            sh 'kubectl apply -f product-service-deployment.yaml'
-                        }
-                    }
-                }
-            }
-        }
+      }
     }
+
+    stage('Build Docker Image') {
+      steps {
+        dir('product-service') {
+          sh 'docker build -t ${APP}:latest .'
+        }
+      }
+    }
+
+    stage('Tag & Push Image to Docker Hub') {
+      steps {
+        script {
+          env.IMAGE_TAG = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+        }
+        withCredentials([usernamePassword(credentialsId: 'DOCKER_HUB_CREDS', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+          sh '''
+            echo "$PASS" | docker login docker.io -u "$USER" --password-stdin
+            docker tag ${APP}:latest ${IMAGE_REPO}:${IMAGE_TAG}
+            docker tag ${APP}:latest ${IMAGE_REPO}:latest
+            docker push ${IMAGE_REPO}:${IMAGE_TAG}
+            docker push ${IMAGE_REPO}:latest
+          '''
+        }
+      }
+    }
+
+    stage('Deploy to Kubernetes') {
+      steps {
+        withCredentials([string(credentialsId: 'kubeconfig-secret-text', variable: 'KUBECONFIG_CONTENT')]) {
+          writeFile file: 'kubeconfig.tmp', text: "${KUBECONFIG_CONTENT}"
+          withEnv(["KUBECONFIG=${env.WORKSPACE}/kubeconfig.tmp"]) {
+            dir('product-service') {
+              sh '''
+                # Update the running Deployment to the new immutable tag;
+                # if the Deployment doesn't exist yet, fall back to apply.
+                kubectl set image deployment/product-service product-service=${IMAGE_REPO}:${IMAGE_TAG} --record \
+                  || kubectl apply -f product-service-deployment.yaml
+
+                kubectl rollout status deployment/product-service
+              '''
+            }
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      sh 'docker image prune -f || true'
+      sh 'rm -f kubeconfig.tmp || true'
+    }
+  }
 }
