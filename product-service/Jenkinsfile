@@ -2,9 +2,11 @@ pipeline {
   agent any
 
   environment {
-    APP          = 'product-service'
-    REGISTRY     = 'docker.io/udawat'
-    IMAGE_REPO   = "${REGISTRY}/${APP}"
+    APP         = 'product-service'
+    REGISTRY    = 'docker.io/udawat'
+    IMAGE_REPO  = "${REGISTRY}/${APP}"
+    // kubeconfig is the flattened file you created & mounted
+    KUBECONFIG  = '/var/jenkins_home/.kube/kubeconfig-ci'
   }
 
   stages {
@@ -44,20 +46,23 @@ pipeline {
 
     stage('Deploy to Kubernetes') {
       steps {
-        // Use a flattened kubeconfig uploaded as a Secret file credential
-        withCredentials([file(credentialsId: 'kubeconfig-file', variable: 'KUBECONFIG')]) {
-          dir('product-service') {
-            sh '''
-              # Try to update image on existing deployment; if it doesn't exist yet, apply manifests first.
-              kubectl set image deployment/${APP} ${APP}=${IMAGE_REPO}:${IMAGE_TAG} || kubectl apply -f product-service-deployment.yaml
+        dir('product-service') {
+          sh '''
+            # Sanity check context
+            kubectl config current-context
 
-              # Ensure the deployment now points to the immutable tag (covers first-time apply case)
-              kubectl set image deployment/${APP} ${APP}=${IMAGE_REPO}:${IMAGE_TAG} --overwrite
+            # Try updating the image (won't fail the build if it's first deploy)
+            kubectl set image deployment/${APP} ${APP}=${IMAGE_REPO}:${IMAGE_TAG} || true
 
-              # Wait for rollout to finish
-              kubectl rollout status deployment/${APP}
-            '''
-          }
+            # Ensure manifests exist (first-time apply or drift)
+            kubectl apply -f product-service-deployment.yaml
+
+            # Force deployment to the immutable tag again (covers first apply case)
+            kubectl set image deployment/${APP} ${APP}=${IMAGE_REPO}:${IMAGE_TAG} --overwrite
+
+            # Wait for rollout
+            kubectl rollout status deployment/${APP} --timeout=180s
+          '''
         }
       }
     }
