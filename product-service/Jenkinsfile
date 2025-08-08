@@ -4,9 +4,7 @@ pipeline {
         stage('Build Application') {
             steps {
                 dir('product-service') {
-                    // Add this line to make the script executable
                     sh 'chmod +x mvnw'
-                    // Now run the build
                     sh './mvnw clean package'
                 }
             }
@@ -18,10 +16,25 @@ pipeline {
                 }
             }
         }
+        stage('Load Image into Minikube') {
+            steps {
+                sh 'minikube image load product-service:latest'
+            }
+        }
         stage('Deploy to Kubernetes') {
             steps {
-                dir('product-service') {
-                    sh 'kubectl apply -f product-service-deployment.yaml'
+                // Load the 'kubeconfig-secret-text' credential into a variable
+                withCredentials([string(credentialsId: 'kubeconfig-secret-text', variable: 'KUBECONFIG_CONTENT')]) {
+                    
+                    // Write the content of that variable to a temporary file in the workspace
+                    writeFile file: 'kubeconfig.tmp', text: KUBECONFIG_CONTENT
+                    
+                    // Use that temporary file as the config for all commands inside this block
+                    withEnv(["KUBECONFIG=${env.WORKSPACE}/kubeconfig.tmp"]) {
+                        dir('product-service') {
+                            sh 'kubectl apply -f product-service-deployment.yaml'
+                        }
+                    }
                 }
             }
         }
