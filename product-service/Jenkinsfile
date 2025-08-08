@@ -1,0 +1,23 @@
+pipeline {
+    agent any
+    stages {
+        stage('Build Application') {
+            steps {
+                // Runs the Maven build to compile and package the app
+                sh './mvnw clean package'
+            }
+        }
+        stage('Build Docker Image') {
+            steps {
+                // Builds a Docker image using the Dockerfile in the current directory
+                sh 'docker build -t product-service:latest .'
+            }
+        }
+        stage('Deploy to Kubernetes') {
+            steps {
+                // Applies the Kubernetes manifest to deploy or update the service
+                sh 'kubectl apply -f product-service-deployment.yaml'
+            }
+        }
+    }
+}
