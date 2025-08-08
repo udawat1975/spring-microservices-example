@@ -2,9 +2,9 @@ pipeline {
   agent any
 
   environment {
-    APP         = 'product-service'
-    REGISTRY    = 'docker.io/udawat'
-    IMAGE_REPO  = "${REGISTRY}/${APP}"
+    APP          = 'product-service'
+    REGISTRY     = 'docker.io/udawat'
+    IMAGE_REPO   = "${REGISTRY}/${APP}"
   }
 
   stages {
@@ -44,19 +44,19 @@ pipeline {
 
     stage('Deploy to Kubernetes') {
       steps {
-        withCredentials([string(credentialsId: 'kubeconfig-secret-text', variable: 'KUBECONFIG_CONTENT')]) {
-          writeFile file: 'kubeconfig.tmp', text: "${KUBECONFIG_CONTENT}"
-          withEnv(["KUBECONFIG=${env.WORKSPACE}/kubeconfig.tmp"]) {
-            dir('product-service') {
-              sh '''
-                # Update the running Deployment to the new immutable tag;
-                # if the Deployment doesn't exist yet, fall back to apply.
-                kubectl set image deployment/product-service product-service=${IMAGE_REPO}:${IMAGE_TAG} --record \
-                  || kubectl apply -f product-service-deployment.yaml
+        // Use a flattened kubeconfig uploaded as a Secret file credential
+        withCredentials([file(credentialsId: 'kubeconfig-file', variable: 'KUBECONFIG')]) {
+          dir('product-service') {
+            sh '''
+              # Try to update image on existing deployment; if it doesn't exist yet, apply manifests first.
+              kubectl set image deployment/${APP} ${APP}=${IMAGE_REPO}:${IMAGE_TAG} || kubectl apply -f product-service-deployment.yaml
 
-                kubectl rollout status deployment/product-service
-              '''
-            }
+              # Ensure the deployment now points to the immutable tag (covers first-time apply case)
+              kubectl set image deployment/${APP} ${APP}=${IMAGE_REPO}:${IMAGE_TAG} --overwrite
+
+              # Wait for rollout to finish
+              kubectl rollout status deployment/${APP}
+            '''
           }
         }
       }
@@ -66,7 +66,6 @@ pipeline {
   post {
     always {
       sh 'docker image prune -f || true'
-      sh 'rm -f kubeconfig.tmp || true'
     }
   }
 }
