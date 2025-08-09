@@ -13,4 +13,14 @@ public class ProductController {
         // In a real app, you'd look this up in a database
         return "Our Product Details for ID: " + id;
     }
+
+    // Health check endpoint
+    @GetMapping("/ping")
+    public String ping() {
+        return "pong";
+    }
+
+
+
 }
+
