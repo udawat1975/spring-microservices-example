@@ -5,7 +5,6 @@ pipeline {
     APP        = 'product-service'
     REGISTRY   = 'docker.io/udawat'
     IMAGE_REPO = "${REGISTRY}/${APP}"
-    // Native Jenkins home (not the container path)
     KUBECONFIG = '/var/lib/jenkins/.kube/config'
   }
 
@@ -48,10 +47,14 @@ pipeline {
       steps {
         dir('product-service') {
           sh '''
-            kubectl config current-context
-            kubectl set image deployment/${APP} ${APP}=${IMAGE_REPO}:${IMAGE_TAG} || true
+            set -e
+            # Ensure resources exist (first run creates them)
             kubectl apply -f product-service-deployment.yaml
-            kubectl set image deployment/${APP} ${APP}=${IMAGE_REPO}:${IMAGE_TAG} --overwrite
+
+            # Update the running deployment to the new immutable tag
+            kubectl set image deployment/${APP} ${APP}=${IMAGE_REPO}:${IMAGE_TAG}
+
+            # Wait for rollout to complete
             kubectl rollout status deployment/${APP} --timeout=180s
           '''
         }
