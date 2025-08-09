@@ -1,0 +1,65 @@
+pipeline {
+  agent any
+
+  environment {
+    APP        = 'order-service'
+    REGISTRY   = 'docker.io/udawat'
+    IMAGE_REPO = "${REGISTRY}/${APP}"
+    KUBECONFIG = '/var/lib/jenkins/.kube/config'
+  }
+
+  stages {
+    stage('Build Application') {
+      steps {
+        dir('order-service') {
+          sh 'chmod +x mvnw'
+          sh './mvnw -q clean package -DskipTests'
+        }
+      }
+    }
+
+    stage('Build Docker Image') {
+      steps {
+        dir('order-service') {
+          sh 'docker build -t ${APP}:latest .'
+        }
+      }
+    }
+
+    stage('Tag & Push Image to Docker Hub') {
+      steps {
+        script {
+          env.IMAGE_TAG = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+        }
+        withCredentials([usernamePassword(credentialsId: 'DOCKER_HUB_CREDS', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+          sh '''
+            echo "$PASS" | docker login docker.io -u "$USER" --password-stdin
+            docker tag ${APP}:latest ${IMAGE_REPO}:${IMAGE_TAG}
+            docker tag ${APP}:latest ${IMAGE_REPO}:latest
+            docker push ${IMAGE_REPO}:${IMAGE_TAG}
+            docker push ${IMAGE_REPO}:latest
+          '''
+        }
+      }
+    }
+
+    stage('Deploy to Kubernetes') {
+      steps {
+        dir('order-service') {
+          sh '''
+            set -e
+            kubectl apply -f order-service-deployment.yaml
+            kubectl set image deployment/${APP} ${APP}=${IMAGE_REPO}:${IMAGE_TAG}
+            kubectl rollout status deployment/${APP} --timeout=180s
+          '''
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      sh 'docker image prune -f || true'
+    }
+  }
+}
