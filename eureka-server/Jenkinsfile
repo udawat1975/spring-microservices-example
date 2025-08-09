@@ -2,16 +2,17 @@ pipeline {
   agent any
 
   environment {
-    APP        = 'eureka-service'
+    APP        = 'eureka-server'              // module folder name
+    IMAGE_APP  = 'eureka-server'              // container/deployment name
     REGISTRY   = 'docker.io/udawat'
-    IMAGE_REPO = "${REGISTRY}/${APP}"
+    IMAGE_REPO = "${REGISTRY}/${IMAGE_APP}"
     KUBECONFIG = '/var/lib/jenkins/.kube/config'
   }
 
   stages {
     stage('Build Application') {
       steps {
-        dir('eureka-service') {
+        dir("${APP}") {
           sh 'chmod +x mvnw'
           sh './mvnw -q clean package -DskipTests'
         }
@@ -20,8 +21,8 @@ pipeline {
 
     stage('Build Docker Image') {
       steps {
-        dir('eureka-service') {
-          sh 'docker build -t ${APP}:latest .'
+        dir("${APP}") {
+          sh "docker build -t ${IMAGE_APP}:latest ."
         }
       }
     }
@@ -32,26 +33,26 @@ pipeline {
           env.IMAGE_TAG = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
         }
         withCredentials([usernamePassword(credentialsId: 'DOCKER_HUB_CREDS', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-          sh '''
+          sh """
             echo "$PASS" | docker login docker.io -u "$USER" --password-stdin
-            docker tag ${APP}:latest ${IMAGE_REPO}:${IMAGE_TAG}
-            docker tag ${APP}:latest ${IMAGE_REPO}:latest
+            docker tag ${IMAGE_APP}:latest ${IMAGE_REPO}:${IMAGE_TAG}
+            docker tag ${IMAGE_APP}:latest ${IMAGE_REPO}:latest
             docker push ${IMAGE_REPO}:${IMAGE_TAG}
             docker push ${IMAGE_REPO}:latest
-          '''
+          """
         }
       }
     }
 
     stage('Deploy to Kubernetes') {
       steps {
-        dir('eureka-service') {
-          sh '''
+        dir("${APP}") {
+          sh """
             set -e
-            kubectl apply -f eureka-service-deployment.yaml
-            kubectl set image deployment/${APP} ${APP}=${IMAGE_REPO}:${IMAGE_TAG}
-            kubectl rollout status deployment/${APP} --timeout=180s
-          '''
+            kubectl apply -f ${IMAGE_APP}-deployment.yaml
+            kubectl set image deployment/${IMAGE_APP} ${IMAGE_APP}=${IMAGE_REPO}:${IMAGE_TAG}
+            kubectl rollout status deployment/${IMAGE_APP} --timeout=180s
+          """
         }
       }
     }
@@ -63,4 +64,3 @@ pipeline {
     }
   }
 }
-
