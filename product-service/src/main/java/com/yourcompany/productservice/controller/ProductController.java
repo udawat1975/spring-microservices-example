@@ -11,6 +11,6 @@ public class ProductController {
     @GetMapping("/products/{id}")
     public String getProduct(@PathVariable String id) {
         // In a real app, you'd look this up in a database
-        return "Product Details for ID: " + id;
+        return "Our Product Details for ID: " + id;
     }
 }
